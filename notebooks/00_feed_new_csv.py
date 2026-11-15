@@ -1,14 +1,15 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # 00 · Feed new CSV batch (simulated incremental source)
-# MAGIC Each run drops **new** CSV file(s) into the landing Volume, replaying the open dataset
-# MAGIC `samples.nyctaxi.trips` one pickup-day per file. After the 60 source days are used up the replay
+# MAGIC Each run drops **new** CSV file(s) into the landing Volume, replaying the dataset **pulled from Google Drive**
+# MAGIC (`workspace.tugas2.gdrive_taxi_trips`, refreshed by the job's first task `00b_pull_from_gdrive`) one pickup-day per file.
+# MAGIC The source table is a job parameter (`source_table`); the original open dataset `samples.nyctaxi.trips` still works as a fallback. After the 60 source days are used up the replay
 # MAGIC loops, shifted forward by 9 whole weeks, so the source never runs dry and weekday patterns stay intact.
 # MAGIC A few dirty rows (nulls, junk strings, duplicates) are injected on purpose so the Silver layer has real cleaning to do.
 
 # COMMAND ----------
 
-dbutils.widgets.text("source_table", "samples.nyctaxi.trips")
+dbutils.widgets.text("source_table", "workspace.tugas2.gdrive_taxi_trips")
 dbutils.widgets.text("landing_path", "/Volumes/workspace/tugas2/raw/landing")
 dbutils.widgets.text("days", "1")
 
@@ -26,7 +27,8 @@ landing = dbutils.widgets.get("landing_path")
 days = int(dbutils.widgets.get("days"))
 os.makedirs(landing, exist_ok=True)
 
-trips = spark.table(src)
+SOURCE_COLS = ["tpep_pickup_datetime", "tpep_dropoff_datetime", "trip_distance", "fare_amount", "pickup_zip", "dropoff_zip"]
+trips = spark.table(src).select(*SOURCE_COLS)  # drop lineage columns (_source, _pulled_at) so Bronze keeps its schema
 b = trips.agg(F.min(F.to_date("tpep_pickup_datetime")).alias("lo"), F.max(F.to_date("tpep_pickup_datetime")).alias("hi")).first()
 span = (b.hi - b.lo).days + 1
 cycle = -(-span // 7) * 7  # replay period rounded up to whole weeks -> weekday patterns survive the wrap

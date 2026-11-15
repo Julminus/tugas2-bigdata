@@ -1,11 +1,14 @@
 # Tugas 2 — Big Data & Databricks End-to-End (NYC Taxi Lakehouse)
 
-Dataset: **`samples.nyctaxi.trips`** (open dataset bawaan Databricks, 21.932 trip taksi NYC Jan–Feb 2016).
+Dataset: NYC Taxi (open dataset `samples.nyctaxi.trips`, 21.932 trip Jan–Feb 2016), **disimpan di Google Drive sebagai sumber data eksternal** dan ditarik ke Databricks oleh job.
 Use case: **regresi tarif taksi (`fare_amount`)** + dashboard KPI perjalanan.
 Platform: Databricks Free Edition (serverless) — Unity Catalog `workspace`, schema baru **`workspace.tugas2`** (terpisah dari `default`).
 
 ```
-samples.nyctaxi.trips ──(00_feed_new_csv, 1 file CSV baru / run)──▶ /Volumes/workspace/tugas2/raw/landing/*.csv
+Google Drive (nyctaxi_trips.csv) ──(00b_pull_from_gdrive)──▶ /Volumes/.../raw/gdrive ──▶ gdrive_taxi_trips ──▶ 01_eda_sql (tabel eda_*)
+        │ (00_feed_new_csv, 1 file CSV baru / run)
+        ▼
+/Volumes/workspace/tugas2/raw/landing/*.csv
         │ Auto Loader (incremental)
         ▼
  bronze_taxi (streaming table) ─▶ silver_taxi (cleaning) ─▶ gold_taxi (agregasi per tanggal+jam) ─▶ v_taxi_daily_kpi (view) ─▶ Dashboard
@@ -13,7 +16,7 @@ samples.nyctaxi.trips ──(00_feed_new_csv, 1 file CSV baru / run)──▶ /V
                                         ├─▶ 02_train_model (MLflow: LinearRegression vs RandomForest) ─▶ UC model taxi_fare_model@champion ─▶ ONNX (02b)
                                         │                                                                        │
                                         └──────────── 03_call_model_api ◀── Model Serving endpoint taxi-fare-endpoint ◀┘
-Databricks Job (cron tiap 2 menit): feed_new_csv ─▶ dlt_bronze_silver_gold ─▶ call_model_api
+Databricks Job (cron tiap 2 menit): pull_from_gdrive ─▶ feed_new_csv ─▶ dlt_bronze_silver_gold ─▶ call_model_api
 ```
 
 ## Link (copy-paste ready)
@@ -51,9 +54,10 @@ POST /serving-endpoints/taxi-fare-endpoint/invocations
 | `dlt/bronze_taxi.py` | Definisi DLT Bronze — Auto Loader `cloudFiles` CSV, path dari config pipeline `source_path` |
 | `dlt/silver_taxi.py` | Definisi DLT Silver — Spark DataFrame: `try_cast`, `dropDuplicates`, `fillna`, expectations (drop null/invalid) |
 | `dlt/gold_taxi.py` | Definisi DLT Gold — agregasi per `pickup_date`, `pickup_hour` (trips, revenue, avg fare, dll.) |
-| `notebooks/00_feed_new_csv.py` | Simulasi sumber incremental: tiap run menaruh 1 file CSV baru (1 hari data) + baris kotor |
+| `notebooks/00_feed_new_csv.py` | Simulasi sumber incremental: tiap run mengambil 1 hari data dari tabel hasil Google Drive (`gdrive_taxi_trips`, job parameter `source_table`) dan menaruhnya sebagai 1 file CSV baru + baris kotor |
 | `notebooks/00a_export_full_csv.py` | Sekali jalan: ekspor seluruh `samples.nyctaxi.trips` ke 1 file CSV di Volume `raw/export/` (sumber file yang diunggah ke Google Drive) |
 | `notebooks/00b_pull_from_gdrive.py` | Tarik CSV dari Google Drive (link publik) ke Volume `raw/gdrive/`, lalu load ke tabel Delta `gdrive_taxi_trips` |
+| `notebooks/01_eda_sql.py` | Exploratory data analysis dengan Spark SQL atas data dari Google Drive; hasil disimpan sebagai 8 tabel SQL `workspace.tugas2.eda_*` |
 | `notebooks/02_train_model.py` | MLflow: Linear Regression vs Random Forest, MAE/RMSE/R², tag `best_model`, register UC alias `champion` |
 | `notebooks/02b_export_onnx.py` | Export model terbaik ke ONNX + verifikasi ONNX Runtime, log ke run terbaik |
 | `notebooks/03_call_model_api.py` | Post-pipeline service call ke endpoint, hasil disimpan ke `taxi_predictions` |
@@ -66,6 +70,8 @@ POST /serving-endpoints/taxi-fare-endpoint/invocations
 
 | Komponen | Status | Bukti |
 |---|---|---|
+| Sumber data eksternal | ✅ | Google Drive → `00b_pull_from_gdrive` (task pertama job) → `gdrive_taxi_trips` → `00_feed_new_csv` → landing → Bronze. Diuji 15 Nov 2026: 4/4 task SUCCESS, file baru `taxi_00061_2016-03-05.csv` (346 baris) masuk Bronze |
+| SQL / EDA | ✅ | `01_eda_sql`: 8 tabel SQL dibuat dengan Spark (`eda_overview`, `eda_column_profile`, `eda_data_quality`, `eda_fare_distribution`, `eda_distance_bands`, `eda_hour_weekday`, `eda_top_zips`, `eda_feature_correlation`) |
 | ETL 3 layer | ✅ | `bronze_taxi`, `silver_taxi`, `gold_taxi` di `workspace.tugas2` (DLT serverless, update COMPLETED) |
 | Incremental | ✅ | Lihat bagian *Incremental* di bawah |
 | Cleaning Silver | ✅ | Load awal: Bronze 10.753 baris (30 file, termasuk 240 duplikat sengaja) → Silver 10.215 baris; 0 null di kolom penting, 0 duplikat |
@@ -75,7 +81,7 @@ POST /serving-endpoints/taxi-fare-endpoint/invocations
 | API deployment | ✅ | `taxi-fare-endpoint` state **READY**, invocations → HTTP 200 (endpoint sempat hilang, dibuat ulang 15 Nov 2026 dengan konfigurasi sama: `taxi_fare_model` v1, Small, scale-to-zero) |
 | Postman | ✅ | 5 request, 18/18 assertion lulus, semua `200 OK` (`postman/Postman-Report.html`, 15 Nov 2026) — termasuk 10 trip dari Google Drive: MAE prediksi vs tarif asli $0,42 |
 | Dashboard | ✅ published | 5 dataset custom SQL (4 dari `gold_taxi`/view `v_taxi_daily_kpi`, 1 dari `taxi_predictions`) — semua query teruji jalan; tampilan widget (counter, line, bar, table) **belum dicek visual** (lihat langkah manual 1) |
-| Automation | ✅ | Cron `0 0/2 * * * ?` (Asia/Jakarta), `max_concurrent_runs=1`, history berisi run `PERIODIC` berulang |
+| Automation | ✅ | Cron `0 0/2 * * * ?` (Asia/Jakarta), `max_concurrent_runs=1`, 4 task: `pull_from_gdrive` → `feed_new_csv` → `dlt_bronze_silver_gold` → `call_model_api`; history berisi run `PERIODIC` berulang |
 
 ### Incremental
 Job berjalan 6× berturut-turut tiap 2 menit (trigger `PERIODIC`, 14:36–14:46 WIB, semua SUCCESS ±110 detik). Isi `bronze_taxi` per waktu ingest (UTC) setelah 5 run pertama (run ke-6 menambah `taxi_00035` dengan pola yang sama):
@@ -98,7 +104,7 @@ FROM workspace.tugas2.bronze_taxi GROUP BY _ingested_at ORDER BY _ingested_at;
 ```
 
 ## Sumber data Google Drive
-Dataset lengkap juga disimpan di Google Drive dan ditarik kembali ke Databricks, sebagai bukti integrasi sumber data eksternal.
+Google Drive adalah **sumber data eksternal pipeline**: setiap run job diawali task `pull_from_gdrive`, dan `00_feed_new_csv` membaca data hasil tarikan itu.
 
 ```
 samples.nyctaxi.trips ──(00a, sekali)──▶ nyctaxi_trips.csv ──(upload)──▶ Google Drive: My Drive/tugas2/nyctaxi_trips.csv
@@ -111,7 +117,7 @@ samples.nyctaxi.trips ──(00a, sekali)──▶ nyctaxi_trips.csv ──(uplo
 * **Cara tarik:** `00b_pull_from_gdrive` mengunduh dari `https://drive.usercontent.google.com/download?id=<file_id>&export=download&confirm=t`, mengecek bahwa hasilnya CSV (bukan halaman HTML Drive) dan kolomnya lengkap, menyimpan ke Volume, lalu menulis tabel Delta dengan tipe kolom yang benar + kolom `_source` (`gdrive:<file_id>`) dan `_pulled_at`. File ID diatur lewat widget `gdrive_file_id` (default sudah terisi), jadi tidak ada path/ID yang di-hardcode di logika.
 * **Konektivitas:** Databricks Free Edition membatasi internet keluar ke domain tertentu; sudah diuji 15 Nov 2026 — `drive.google.com` (200), `drive.usercontent.google.com` dan `www.googleapis.com` bisa dijangkau dari serverless.
 * **Hasil verifikasi (15 Nov 2026):** notebook dijalankan, 4/4 cell sukses, `workspace.tugas2.gdrive_taxi_trips` = **21.932 baris** (sama dengan sumber). File unduhan identik byte-per-byte dengan file ekspor.
-* **Terpisah dari Job:** `00b` tidak menulis ke folder `landing`, jadi `bronze_taxi` dan job terjadwal tidak terpengaruh. Menjalankan ulang akan memuat ulang tabel dari isi file Drive saat itu (overwrite tabel `gdrive_taxi_trips` saja).
+* **Bagian dari Job (sejak 15 Nov 2026):** `00b` adalah task pertama `pull_from_gdrive` (job parameter `gdrive_file_id`); `00_feed_new_csv` membaca `gdrive_taxi_trips` (job parameter `source_table`, hanya 6 kolom asli sehingga skema Bronze tetap sama). `00b` sendiri tidak menulis ke `landing`; setiap run memuat ulang tabel `gdrive_taxi_trips` dari isi file Drive saat itu. Untuk kembali ke sumber lama, ubah parameter `source_table` ke `samples.nyctaxi.trips`.
 * **Jika Drive tidak bisa dijangkau / file berubah akses:** notebook berhenti dengan pesan jelas. Cadangan: unggah CSV manual ke Volume `raw/gdrive/` (Catalog → `workspace.tugas2` → `raw` → *Upload to this volume*) lalu jalankan dari langkah 2.
 
 Query bukti:
@@ -121,7 +127,7 @@ SELECT _source, max(_pulled_at) pulled_at, count(*) rows FROM workspace.tugas2.g
 
 ## Catatan desain / penyimpangan dari instruksi
 * **`INSERT OVERWRITE` tidak dipakai** di Bronze: instruksi 2.1 meminta INSERT OVERWRITE tetapi sekaligus melarang *Full Overwrite* dan mewajibkan incremental. Yang dipakai adalah DLT streaming table + Auto Loader (checkpoint file yang sudah diproses), yang memenuhi kriteria pass/fail "Bronze membaca file baru secara incremental".
-* **Tanpa hardcode path**: path landing berasal dari konfigurasi pipeline (`source_path`) dan job parameter (`landing_path`, `endpoint_name`).
+* **Tanpa hardcode path**: path landing berasal dari konfigurasi pipeline (`source_path`) dan job parameter (`landing_path`, `endpoint_name`, `source_table`, `gdrive_file_id`).
 * **Sumber data incremental**: karena dataset open-access bersifat statis, `00_feed_new_csv` me-replay data per hari pickup (60 hari, lalu berulang dengan geser 9 minggu — 2016-03-04 dst. — sehingga tidak pernah habis dan pola hari tetap sama), plus sengaja menyisipkan null, string `"N/A"`, dan duplikat agar Silver benar-benar membersihkan data.
 * **Model serving**: format serving = MLflow sklearn pyfunc (Databricks Model Serving, scale-to-zero). ONNX diekspor sebagai artifact standar terpisah. Karena scale-to-zero, request pertama setelah idle bisa butuh beberapa menit (cold start) — **panggil endpoint sekali beberapa menit sebelum demo**.
 * **Nilai tambah (image data)** tidak dikerjakan.

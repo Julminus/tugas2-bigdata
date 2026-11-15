@@ -1,6 +1,6 @@
 {
   "name": "tugas2_taxi_lakehouse_job",
-  "description": "Tugas 2: feed new CSV -> DLT (bronze -> silver -> gold) -> call model serving API. Runs every 2 minutes.",
+  "description": "Tugas 2: pull dataset from Google Drive -> feed new CSV -> DLT (bronze -> silver -> gold) -> call model serving API. Runs every 2 minutes.",
   "email_notifications": {},
   "webhook_notifications": {},
   "timeout_seconds": 0,
@@ -12,13 +12,33 @@
   "max_concurrent_runs": 1,
   "tasks": [
     {
+      "task_key": "pull_from_gdrive",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "/Users/databricks-user@example.com/tugas2/00b_pull_from_gdrive",
+        "base_parameters": {
+          "gdrive_file_id": "{{job.parameters.gdrive_file_id}}"
+        },
+        "source": "WORKSPACE"
+      },
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "disabled": false
+    },
+    {
       "task_key": "feed_new_csv",
+      "depends_on": [
+        {
+          "task_key": "pull_from_gdrive"
+        }
+      ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "/Users/databricks-user@example.com/tugas2/00_feed_new_csv",
         "base_parameters": {
           "landing_path": "{{job.parameters.landing_path}}",
-          "days": "1"
+          "days": "1",
+          "source_table": "{{job.parameters.source_table}}"
         },
         "source": "WORKSPACE"
       },
@@ -74,6 +94,14 @@
     {
       "name": "endpoint_name",
       "default": "taxi-fare-endpoint"
+    },
+    {
+      "name": "source_table",
+      "default": "workspace.tugas2.gdrive_taxi_trips"
+    },
+    {
+      "name": "gdrive_file_id",
+      "default": "1qdFdNSagZw27kni-QjAXtlHG0ZrtgDsx"
     }
   ]
 }
