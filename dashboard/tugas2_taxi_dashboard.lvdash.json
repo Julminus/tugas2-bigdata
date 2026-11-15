@@ -1,0 +1,751 @@
+{
+  "datasets": [
+    {
+      "name": "ds_kpi",
+      "displayName": "Overall KPIs",
+      "query": "SELECT SUM(trips) AS trips, ROUND(SUM(revenue), 2) AS revenue,\n  ROUND(SUM(revenue) / SUM(trips), 2) AS avg_fare, COUNT(*) AS days_loaded,\n  date_format(MAX(last_ingested_at), 'yyyy-MM-dd HH:mm:ss') AS last_refresh\nFROM workspace.tugas2.v_taxi_daily_kpi"
+    },
+    {
+      "name": "ds_daily",
+      "displayName": "Daily trend (view)",
+      "query": "SELECT * FROM workspace.tugas2.v_taxi_daily_kpi"
+    },
+    {
+      "name": "ds_hourly",
+      "displayName": "Trips by pickup hour",
+      "query": "SELECT pickup_hour, SUM(trips) AS trips, ROUND(SUM(total_fare) / SUM(trips), 2) AS avg_fare\nFROM workspace.tugas2.gold_taxi GROUP BY pickup_hour"
+    },
+    {
+      "name": "ds_dow",
+      "displayName": "Fare per mile by weekday",
+      "query": "SELECT pickup_dow, element_at(array('1-Sun','2-Mon','3-Tue','4-Wed','5-Thu','6-Fri','7-Sat'), pickup_dow) AS weekday,\n  SUM(trips) AS trips, ROUND(SUM(total_fare) / SUM(trips * avg_distance_mi), 2) AS fare_per_mile\nFROM workspace.tugas2.gold_taxi GROUP BY pickup_dow"
+    },
+    {
+      "name": "ds_pred",
+      "displayName": "Model API predictions",
+      "query": "SELECT scored_at, pickup_ts, trip_distance, trip_duration_min, fare_amount AS actual_fare,\n  ROUND(predicted_fare, 2) AS predicted_fare, ROUND(ABS(predicted_fare - fare_amount), 2) AS abs_error\nFROM workspace.tugas2.taxi_predictions ORDER BY scored_at DESC, pickup_ts DESC LIMIT 50"
+    }
+  ],
+  "pages": [
+    {
+      "name": "overview",
+      "displayName": "Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "textbox_spec": "# NYC Taxi Lakehouse \u2014 Gold layer\nSource: `workspace.tugas2.gold_taxi` + custom view `v_taxi_daily_kpi` \u00b7 refreshed by the scheduled DLT job"
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "k_trips",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_kpi",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "v",
+                      "expression": "SUM(`trips`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "v",
+                  "displayName": "Total trips"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total trips"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "k_rev",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_kpi",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "v",
+                      "expression": "SUM(`revenue`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "v",
+                  "displayName": "Total revenue (USD)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total revenue (USD)"
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "k_fare",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_kpi",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "v",
+                      "expression": "AVG(`avg_fare`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "v",
+                  "displayName": "Avg fare (USD)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Avg fare (USD)"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "k_days",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_kpi",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "v",
+                      "expression": "SUM(`days_loaded`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "v",
+                  "displayName": "Days loaded"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Days loaded"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "k_last",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_kpi",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "v",
+                      "expression": "MAX(`last_refresh`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "v",
+                  "displayName": "Last ingested (UTC)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Last ingested (UTC)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "c_daily",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_daily",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "pickup_date",
+                      "expression": "`pickup_date`"
+                    },
+                    {
+                      "name": "trips",
+                      "expression": "`trips`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "frame": {
+                "showTitle": true,
+                "title": "Daily trips (grows with every job run)"
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "pickup_date",
+                  "displayName": "Pickup date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "axis": {
+                    "title": "Pickup date"
+                  }
+                },
+                "y": {
+                  "fieldName": "trips",
+                  "displayName": "Trips",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Trips"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "c_rev",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_daily",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "pickup_date",
+                      "expression": "`pickup_date`"
+                    },
+                    {
+                      "name": "revenue",
+                      "expression": "`revenue`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "frame": {
+                "showTitle": true,
+                "title": "Daily revenue (USD)"
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "pickup_date",
+                  "displayName": "Pickup date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "axis": {
+                    "title": "Pickup date"
+                  }
+                },
+                "y": {
+                  "fieldName": "revenue",
+                  "displayName": "Revenue",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Revenue"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "c_hour",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_hourly",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "pickup_hour",
+                      "expression": "`pickup_hour`"
+                    },
+                    {
+                      "name": "trips",
+                      "expression": "`trips`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "frame": {
+                "showTitle": true,
+                "title": "Trips by pickup hour"
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "pickup_hour",
+                  "displayName": "Hour of day",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "axis": {
+                    "title": "Hour of day"
+                  }
+                },
+                "y": {
+                  "fieldName": "trips",
+                  "displayName": "Trips",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Trips"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 9,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "c_dow",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dow",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "weekday",
+                      "expression": "`weekday`"
+                    },
+                    {
+                      "name": "fare_per_mile",
+                      "expression": "`fare_per_mile`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "frame": {
+                "showTitle": true,
+                "title": "Fare per mile by weekday"
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "weekday",
+                  "displayName": "Weekday",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "axis": {
+                    "title": "Weekday"
+                  }
+                },
+                "y": {
+                  "fieldName": "fare_per_mile",
+                  "displayName": "USD / mile",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "USD / mile"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "t_pred",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_pred",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "scored_at",
+                      "expression": "`scored_at`"
+                    },
+                    {
+                      "name": "pickup_ts",
+                      "expression": "`pickup_ts`"
+                    },
+                    {
+                      "name": "trip_distance",
+                      "expression": "`trip_distance`"
+                    },
+                    {
+                      "name": "trip_duration_min",
+                      "expression": "`trip_duration_min`"
+                    },
+                    {
+                      "name": "actual_fare",
+                      "expression": "`actual_fare`"
+                    },
+                    {
+                      "name": "predicted_fare",
+                      "expression": "`predicted_fare`"
+                    },
+                    {
+                      "name": "abs_error",
+                      "expression": "`abs_error`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "allowSearch": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "highlightLinks": false,
+                    "imageHeight": "",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "linkOpenInNewTab": true,
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "preserveWhitespace": false,
+                    "useMonospaceFont": false,
+                    "visible": true,
+                    "displayAs": "datetime",
+                    "type": "datetime",
+                    "fieldName": "scored_at",
+                    "displayName": "scored_at",
+                    "title": "scored_at",
+                    "order": 100000
+                  },
+                  {
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "allowSearch": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "highlightLinks": false,
+                    "imageHeight": "",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "linkOpenInNewTab": true,
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "preserveWhitespace": false,
+                    "useMonospaceFont": false,
+                    "visible": true,
+                    "displayAs": "datetime",
+                    "type": "datetime",
+                    "fieldName": "pickup_ts",
+                    "displayName": "pickup_ts",
+                    "title": "pickup_ts",
+                    "order": 100001
+                  },
+                  {
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "allowSearch": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "highlightLinks": false,
+                    "imageHeight": "",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "linkOpenInNewTab": true,
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "preserveWhitespace": false,
+                    "useMonospaceFont": false,
+                    "visible": true,
+                    "displayAs": "number",
+                    "type": "float",
+                    "fieldName": "trip_distance",
+                    "displayName": "trip_distance",
+                    "title": "trip_distance",
+                    "order": 100002,
+                    "numberFormat": "0.00"
+                  },
+                  {
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "allowSearch": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "highlightLinks": false,
+                    "imageHeight": "",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "linkOpenInNewTab": true,
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "preserveWhitespace": false,
+                    "useMonospaceFont": false,
+                    "visible": true,
+                    "displayAs": "number",
+                    "type": "float",
+                    "fieldName": "trip_duration_min",
+                    "displayName": "trip_duration_min",
+                    "title": "trip_duration_min",
+                    "order": 100003,
+                    "numberFormat": "0.00"
+                  },
+                  {
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "allowSearch": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "highlightLinks": false,
+                    "imageHeight": "",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "linkOpenInNewTab": true,
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "preserveWhitespace": false,
+                    "useMonospaceFont": false,
+                    "visible": true,
+                    "displayAs": "number",
+                    "type": "float",
+                    "fieldName": "actual_fare",
+                    "displayName": "actual_fare",
+                    "title": "actual_fare",
+                    "order": 100004,
+                    "numberFormat": "0.00"
+                  },
+                  {
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "allowSearch": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "highlightLinks": false,
+                    "imageHeight": "",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "linkOpenInNewTab": true,
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "preserveWhitespace": false,
+                    "useMonospaceFont": false,
+                    "visible": true,
+                    "displayAs": "number",
+                    "type": "float",
+                    "fieldName": "predicted_fare",
+                    "displayName": "predicted_fare",
+                    "title": "predicted_fare",
+                    "order": 100005,
+                    "numberFormat": "0.00"
+                  },
+                  {
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "allowSearch": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "highlightLinks": false,
+                    "imageHeight": "",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "linkOpenInNewTab": true,
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "preserveWhitespace": false,
+                    "useMonospaceFont": false,
+                    "visible": true,
+                    "displayAs": "number",
+                    "type": "float",
+                    "fieldName": "abs_error",
+                    "displayName": "abs_error",
+                    "title": "abs_error",
+                    "order": 100006,
+                    "numberFormat": "0.00"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Model API: latest predictions vs actual"
+              },
+              "itemsPerPage": 25,
+              "condensed": true,
+              "allowHTMLByDefault": false,
+              "paginationSize": "default",
+              "withRowNumber": false,
+              "invisibleColumns": []
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 14,
+            "width": 3,
+            "height": 5
+          }
+        }
+      ]
+    }
+  ]
+}

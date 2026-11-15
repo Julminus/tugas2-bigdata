@@ -1,0 +1,205 @@
+{
+  "info": {
+    "name": "Tugas 2 - Taxi Fare Model API (Databricks Model Serving)",
+    "description": "Health check + inference tests for the Databricks Model Serving endpoint that serves the best MLflow model (workspace.tugas2.taxi_fare_model@champion).\n\nSet collection variables `host`, `endpoint_name`, and `token` (a Databricks personal access token - keep it in the Postman *current value* only, never commit it).\n\nInput schema (from silver_taxi): trip_distance (mi), trip_duration_min, pickup_hour (0-23), pickup_dow (1=Sun..7=Sat), pickup_zip, dropoff_zip. Output: predicted fare_amount (USD).\n\nRequests 4-5 connect the Google Drive dataset to the API: request 4 downloads My Drive/tugas2/nyctaxi_trips.csv (public link, no auth - the Databricks token is NOT sent to Google), validates it and builds features for `gdrive_sample_size` evenly spaced trips exactly like silver_taxi (duration in minutes rounded to 2 decimals, hour, dayofweek 1=Sun..7=Sat, missing zip -> 0, silver expectations applied). Request 5 sends those trips to the model and compares predictions with the real fare_amount. Note: these trips come from the same source the model was trained on, so the error shown is an in-sample sanity check, not a held-out evaluation.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "host",
+      "value": "https://dbc-ee445d02-3afe.cloud.databricks.com"
+    },
+    {
+      "key": "endpoint_name",
+      "value": "taxi-fare-endpoint"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "gdrive_file_id",
+      "value": "1qdFdNSagZw27kni-QjAXtlHG0ZrtgDsx"
+    },
+    {
+      "key": "gdrive_sample_size",
+      "value": "10"
+    },
+    {
+      "key": "gdrive_rows",
+      "value": "[]"
+    },
+    {
+      "key": "gdrive_fares",
+      "value": "[]"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health check - endpoint status",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('Endpoint is READY', () => pm.expect(body.state.ready).to.eql('READY'));",
+              "pm.test('Serves the champion taxi fare model', () => pm.expect(body.config.served_entities[0].entity_name).to.include('taxi_fare_model'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{host}}/api/2.0/serving-endpoints/{{endpoint_name}}"
+      }
+    },
+    {
+      "name": "2. Predict fare - dataframe_split (batch of 3)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Response is valid JSON with predictions', () => pm.expect(pm.response.json()).to.have.property('predictions'));",
+              "const p = pm.response.json().predictions;",
+              "pm.test('One numeric prediction per input row', () => { pm.expect(p).to.have.lengthOf(3); p.forEach(v => pm.expect(v).to.be.a('number')); });",
+              "pm.test('Predicted fares are positive', () => p.forEach(v => pm.expect(v).to.be.above(0)));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"dataframe_split\": {\n    \"columns\": [\"trip_distance\", \"trip_duration_min\", \"pickup_hour\", \"pickup_dow\", \"pickup_zip\", \"dropoff_zip\"],\n    \"data\": [\n      [1.4, 9.4, 21, 7, 10103, 10110],\n      [3.2, 15.0, 8, 2, 10023, 10001],\n      [10.5, 32.0, 17, 5, 10019, 11371]\n    ]\n  }\n}"
+        },
+        "url": "{{host}}/serving-endpoints/{{endpoint_name}}/invocations"
+      }
+    },
+    {
+      "name": "3. Predict fare - dataframe_records (single trip)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const p = pm.response.json().predictions;",
+              "pm.test('Single numeric prediction', () => { pm.expect(p).to.have.lengthOf(1); pm.expect(p[0]).to.be.a('number'); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"dataframe_records\": [\n    {\"trip_distance\": 2.5, \"trip_duration_min\": 12.0, \"pickup_hour\": 18, \"pickup_dow\": 6, \"pickup_zip\": 10001, \"dropoff_zip\": 10018}\n  ]\n}"
+        },
+        "url": "{{host}}/serving-endpoints/{{endpoint_name}}/invocations"
+      }
+    },
+    {
+      "name": "4. Google Drive - fetch dataset (CSV)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const lines = pm.response.text().trim().split(/\\r?\\n/);",
+              "pm.test('Drive returned the CSV, not an HTML page', () => pm.expect(lines[0]).to.not.match(/^\\s*</));",
+              "pm.test('CSV has the 6 expected columns', () => pm.expect(lines[0].split(',')).to.eql(['tpep_pickup_datetime', 'tpep_dropoff_datetime', 'trip_distance', 'fare_amount', 'pickup_zip', 'dropoff_zip']));",
+              "pm.test('Full dataset: 21,932 trips', () => pm.expect(lines.length - 1).to.eql(21932));",
+              "",
+              "// Build model features like silver_taxi. Timestamps are naive 'YYYY-MM-DD HH:MM:SS' strings: parse as UTC so hour/day never shift with the local timezone.",
+              "const ts = s => { const [d, t] = s.split(' '); const [Y, M, D] = d.split('-').map(Number); const [h, m, x] = t.split(':').map(Number); return Date.UTC(Y, M - 1, D, h, m, x); };",
+              "const N = Number(pm.collectionVariables.get('gdrive_sample_size')) || 10;",
+              "const step = Math.max(1, Math.floor((lines.length - 1) / N));",
+              "const rows = [], fares = [];",
+              "for (let i = 1; i < lines.length && rows.length < N; i += step) {",
+              "  const [pu, dof, dist, fare, pz, dz] = lines[i].split(',');",
+              "  const t0 = ts(pu), dur = Math.round((ts(dof) - t0) / 600) / 100;  // minutes, 2 decimals",
+              "  if (!(+dist > 0 && +dist < 100 && +fare > 0 && +fare < 500 && dur > 0 && dur <= 180)) continue;  // silver expectations",
+              "  const d0 = new Date(t0);",
+              "  rows.push([+dist, dur, d0.getUTCHours(), d0.getUTCDay() + 1, +pz || 0, +dz || 0]);",
+              "  fares.push(+fare);",
+              "}",
+              "pm.test(`Built features for ${rows.length} sample trips`, () => pm.expect(rows.length).to.be.at.least(5));",
+              "pm.collectionVariables.set('gdrive_rows', JSON.stringify(rows));",
+              "pm.collectionVariables.set('gdrive_fares', JSON.stringify(fares));",
+              "console.log('Drive sample features:', JSON.stringify(rows));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "url": "https://drive.usercontent.google.com/download?id={{gdrive_file_id}}&export=download&confirm=t"
+      }
+    },
+    {
+      "name": "5. Predict fare - trips pulled from Google Drive",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const p = pm.response.json().predictions;",
+              "const fares = JSON.parse(pm.collectionVariables.get('gdrive_fares'));",
+              "pm.test('One prediction per Drive trip', () => pm.expect(p).to.have.lengthOf(fares.length));",
+              "pm.test('Predictions are positive numbers', () => p.forEach(v => { pm.expect(v).to.be.a('number'); pm.expect(v).to.be.above(0); }));",
+              "const mae = p.reduce((s, v, i) => s + Math.abs(v - fares[i]), 0) / p.length;",
+              "p.forEach((v, i) => console.log(`trip ${i + 1}: actual $${fares[i].toFixed(2)}  predicted $${v.toFixed(2)}`));",
+              "pm.test(`Mean absolute error vs actual fare is below $3 (got $${mae.toFixed(2)})`, () => pm.expect(mae).to.be.below(3));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"dataframe_split\": {\n    \"columns\": [\"trip_distance\", \"trip_duration_min\", \"pickup_hour\", \"pickup_dow\", \"pickup_zip\", \"dropoff_zip\"],\n    \"data\": {{gdrive_rows}}\n  }\n}"
+        },
+        "url": "{{host}}/serving-endpoints/{{endpoint_name}}/invocations"
+      }
+    }
+  ]
+}
