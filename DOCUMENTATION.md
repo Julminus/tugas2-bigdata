@@ -180,3 +180,4 @@ Job `tugas2_taxi_lakehouse_job`: `feed_new_csv` → `dlt_bronze_silver_gold` →
 - No tokens are stored in the repo; the Postman collection's `token` variable is empty and the HTML report hides the `Authorization` header and the `token` variable.
 - Keep the PAT in a private local file (e.g. `~/.databricks_tugas2_token`, `chmod 600`) or in Postman's *current value* only. Revoke tokens that were shared anywhere, and after the demo.
 - The Drive file is public-by-link; it only contains the open `samples.nyctaxi.trips` data.
+- Personal identifiers are replaced with the placeholder `databricks-user@example.com` (notebook paths in `job/job_config.json`, the endpoint `creator` field in the Postman report). Replace it with your Databricks username when re-importing the job.
