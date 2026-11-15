@@ -3,27 +3,314 @@
     {
       "name": "ds_kpi",
       "displayName": "Overall KPIs",
-      "query": "SELECT SUM(trips) AS trips, ROUND(SUM(revenue), 2) AS revenue,\n  ROUND(SUM(revenue) / SUM(trips), 2) AS avg_fare, COUNT(*) AS days_loaded,\n  date_format(MAX(last_ingested_at), 'yyyy-MM-dd HH:mm:ss') AS last_refresh\nFROM workspace.tugas2.v_taxi_daily_kpi"
+      "queryLines": [
+        "SELECT SUM(trips) AS trips, ROUND(SUM(revenue), 2) AS revenue,\n",
+        "  ROUND(SUM(revenue) / SUM(trips), 2) AS avg_fare, COUNT(*) AS days_loaded,\n",
+        "  date_format(MAX(last_ingested_at), 'yyyy-MM-dd HH:mm:ss') AS last_refresh\n",
+        "FROM workspace.tugas2.v_taxi_daily_kpi"
+      ]
     },
     {
       "name": "ds_daily",
       "displayName": "Daily trend (view)",
-      "query": "SELECT * FROM workspace.tugas2.v_taxi_daily_kpi"
+      "queryLines": [
+        "SELECT * FROM workspace.tugas2.v_taxi_daily_kpi"
+      ]
     },
     {
       "name": "ds_hourly",
       "displayName": "Trips by pickup hour",
-      "query": "SELECT pickup_hour, SUM(trips) AS trips, ROUND(SUM(total_fare) / SUM(trips), 2) AS avg_fare\nFROM workspace.tugas2.gold_taxi GROUP BY pickup_hour"
+      "queryLines": [
+        "SELECT pickup_hour, SUM(trips) AS trips, ROUND(SUM(total_fare) / SUM(trips), 2) AS avg_fare\n",
+        "FROM workspace.tugas2.gold_taxi GROUP BY pickup_hour"
+      ]
     },
     {
       "name": "ds_dow",
       "displayName": "Fare per mile by weekday",
-      "query": "SELECT pickup_dow, element_at(array('1-Sun','2-Mon','3-Tue','4-Wed','5-Thu','6-Fri','7-Sat'), pickup_dow) AS weekday,\n  SUM(trips) AS trips, ROUND(SUM(total_fare) / SUM(trips * avg_distance_mi), 2) AS fare_per_mile\nFROM workspace.tugas2.gold_taxi GROUP BY pickup_dow"
+      "queryLines": [
+        "SELECT pickup_dow, element_at(array('1-Sun','2-Mon','3-Tue','4-Wed','5-Thu','6-Fri','7-Sat'), pickup_dow) AS weekday,\n",
+        "  SUM(trips) AS trips, ROUND(SUM(total_fare) / SUM(trips * avg_distance_mi), 2) AS fare_per_mile\n",
+        "FROM workspace.tugas2.gold_taxi GROUP BY pickup_dow"
+      ]
     },
     {
       "name": "ds_pred",
       "displayName": "Model API predictions",
-      "query": "SELECT scored_at, pickup_ts, trip_distance, trip_duration_min, fare_amount AS actual_fare,\n  ROUND(predicted_fare, 2) AS predicted_fare, ROUND(ABS(predicted_fare - fare_amount), 2) AS abs_error\nFROM workspace.tugas2.taxi_predictions ORDER BY scored_at DESC, pickup_ts DESC LIMIT 50"
+      "queryLines": [
+        "SELECT scored_at, pickup_ts, trip_distance, trip_duration_min, fare_amount AS actual_fare,\n",
+        "  ROUND(predicted_fare, 2) AS predicted_fare, ROUND(ABS(predicted_fare - fare_amount), 2) AS abs_error\n",
+        "FROM workspace.tugas2.taxi_predictions ORDER BY scored_at DESC, pickup_ts DESC LIMIT 50"
+      ]
+    },
+    {
+      "name": "ds_ml_whatif",
+      "displayName": "ML · What-if prediction",
+      "queryLines": [
+        "WITH p AS (\n",
+        "  SELECT CAST(:distance AS DOUBLE) AS d, CAST(:duration AS DOUBLE) AS m, CAST(:hour AS INT) AS h,\n",
+        "         CAST(:dow AS INT) AS w, CAST(:pickup_zip AS INT) AS pz, CAST(:dropoff_zip AS INT) AS dz\n",
+        ")\n",
+        "SELECT\n",
+        "  ROUND(ai_query('taxi-fare-endpoint', named_struct(\n",
+        "    'trip_distance', d, 'trip_duration_min', m, 'pickup_hour', CAST(h AS DOUBLE), 'pickup_dow', CAST(w AS DOUBLE),\n",
+        "    'pickup_zip', CAST(pz AS DOUBLE), 'dropoff_zip', CAST(dz AS DOUBLE))), 2) AS predicted_fare,\n",
+        "  (SELECT ROUND(AVG(fare_amount), 2) FROM workspace.tugas2.silver_taxi\n",
+        "     WHERE trip_distance BETWEEN d * 0.8 AND d * 1.2 AND ABS(trip_duration_min - m) <= GREATEST(3, m * 0.25)) AS similar_avg_fare,\n",
+        "  (SELECT COUNT(*) FROM workspace.tugas2.silver_taxi\n",
+        "     WHERE trip_distance BETWEEN d * 0.8 AND d * 1.2 AND ABS(trip_duration_min - m) <= GREATEST(3, m * 0.25)) AS similar_trips,\n",
+        "  CONCAT(ROUND(d, 2), ' mi · ', ROUND(m, 1), ' min · ',\n",
+        "         element_at(array('Sun','Mon','Tue','Wed','Thu','Fri','Sat'), w), ' ', LPAD(CAST(h AS STRING), 2, '0'), ':00 · zip ',\n",
+        "         pz, ' → ', dz) AS scenario\n",
+        "FROM p"
+      ],
+      "parameters": [
+        {
+          "displayName": "Trip distance (miles)",
+          "keyword": "distance",
+          "dataType": "DECIMAL",
+          "defaultSelection": {
+            "values": {
+              "dataType": "DECIMAL",
+              "values": [
+                {
+                  "value": "2.5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Trip duration (minutes)",
+          "keyword": "duration",
+          "dataType": "DECIMAL",
+          "defaultSelection": {
+            "values": {
+              "dataType": "DECIMAL",
+              "values": [
+                {
+                  "value": "12"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Pickup hour (0–23)",
+          "keyword": "hour",
+          "dataType": "INTEGER",
+          "defaultSelection": {
+            "values": {
+              "dataType": "INTEGER",
+              "values": [
+                {
+                  "value": "18"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Day of week (1=Sun … 7=Sat)",
+          "keyword": "dow",
+          "dataType": "INTEGER",
+          "defaultSelection": {
+            "values": {
+              "dataType": "INTEGER",
+              "values": [
+                {
+                  "value": "6"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Pickup zip",
+          "keyword": "pickup_zip",
+          "dataType": "INTEGER",
+          "defaultSelection": {
+            "values": {
+              "dataType": "INTEGER",
+              "values": [
+                {
+                  "value": "10001"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Dropoff zip",
+          "keyword": "dropoff_zip",
+          "dataType": "INTEGER",
+          "defaultSelection": {
+            "values": {
+              "dataType": "INTEGER",
+              "values": [
+                {
+                  "value": "10018"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_ml_curve",
+      "displayName": "ML · Fare vs distance curve",
+      "queryLines": [
+        "WITH p AS (\n",
+        "  SELECT GREATEST(CAST(:distance AS DOUBLE), 0.1) AS d, CAST(:duration AS DOUBLE) AS m, CAST(:hour AS INT) AS h,\n",
+        "         CAST(:dow AS INT) AS w, CAST(:pickup_zip AS INT) AS pz, CAST(:dropoff_zip AS INT) AS dz\n",
+        "), g AS (SELECT explode(sequence(1, 20)) AS miles)\n",
+        "SELECT miles AS trip_distance, ROUND(m * miles / d, 1) AS trip_duration_min,\n",
+        "  ROUND(ai_query('taxi-fare-endpoint', named_struct(\n",
+        "    'trip_distance', CAST(miles AS DOUBLE), 'trip_duration_min', m * miles / d, 'pickup_hour', CAST(h AS DOUBLE),\n",
+        "    'pickup_dow', CAST(w AS DOUBLE), 'pickup_zip', CAST(pz AS DOUBLE), 'dropoff_zip', CAST(dz AS DOUBLE))), 2) AS predicted_fare\n",
+        "FROM p CROSS JOIN g"
+      ],
+      "parameters": [
+        {
+          "displayName": "Trip distance (miles)",
+          "keyword": "distance",
+          "dataType": "DECIMAL",
+          "defaultSelection": {
+            "values": {
+              "dataType": "DECIMAL",
+              "values": [
+                {
+                  "value": "2.5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Trip duration (minutes)",
+          "keyword": "duration",
+          "dataType": "DECIMAL",
+          "defaultSelection": {
+            "values": {
+              "dataType": "DECIMAL",
+              "values": [
+                {
+                  "value": "12"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Pickup hour (0–23)",
+          "keyword": "hour",
+          "dataType": "INTEGER",
+          "defaultSelection": {
+            "values": {
+              "dataType": "INTEGER",
+              "values": [
+                {
+                  "value": "18"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Day of week (1=Sun … 7=Sat)",
+          "keyword": "dow",
+          "dataType": "INTEGER",
+          "defaultSelection": {
+            "values": {
+              "dataType": "INTEGER",
+              "values": [
+                {
+                  "value": "6"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Pickup zip",
+          "keyword": "pickup_zip",
+          "dataType": "INTEGER",
+          "defaultSelection": {
+            "values": {
+              "dataType": "INTEGER",
+              "values": [
+                {
+                  "value": "10001"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Dropoff zip",
+          "keyword": "dropoff_zip",
+          "dataType": "INTEGER",
+          "defaultSelection": {
+            "values": {
+              "dataType": "INTEGER",
+              "values": [
+                {
+                  "value": "10018"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_ml_live",
+      "displayName": "ML · Live API metrics",
+      "queryLines": [
+        "SELECT COUNT(*) AS scored_trips,\n",
+        "  ROUND(AVG(ABS(predicted_fare - fare_amount)), 3) AS mae,\n",
+        "  ROUND(SQRT(AVG(POW(predicted_fare - fare_amount, 2))), 3) AS rmse,\n",
+        "  COUNT(DISTINCT scored_at) AS api_batches,\n",
+        "  date_format(MAX(scored_at), 'MMM d, HH:mm') AS last_scored\n",
+        "FROM workspace.tugas2.taxi_predictions"
+      ]
+    },
+    {
+      "name": "ds_ml_scatter",
+      "displayName": "ML · Actual vs predicted",
+      "queryLines": [
+        "SELECT fare_amount AS actual_fare, ROUND(predicted_fare, 2) AS predicted_fare, trip_distance\n",
+        "FROM workspace.tugas2.taxi_predictions"
+      ]
+    },
+    {
+      "name": "ds_ml_trend",
+      "displayName": "ML · Error per API batch",
+      "queryLines": [
+        "SELECT scored_at, COUNT(*) AS trips, ROUND(AVG(ABS(predicted_fare - fare_amount)), 3) AS mae\n",
+        "FROM workspace.tugas2.taxi_predictions GROUP BY scored_at ORDER BY scored_at"
+      ]
+    },
+    {
+      "name": "ds_ml_dist",
+      "displayName": "ML · Error by distance band",
+      "queryLines": [
+        "SELECT CASE WHEN trip_distance < 1 THEN '1) under 1 mi' WHEN trip_distance < 3 THEN '2) 1–3 mi'\n",
+        "            WHEN trip_distance < 6 THEN '3) 3–6 mi' ELSE '4) 6+ mi' END AS distance_band,\n",
+        "  COUNT(*) AS trips, ROUND(AVG(ABS(predicted_fare - fare_amount)), 3) AS mae\n",
+        "FROM workspace.tugas2.taxi_predictions GROUP BY 1"
+      ]
+    },
+    {
+      "name": "ds_ml_compare",
+      "displayName": "ML · Model comparison (MLflow)",
+      "queryLines": [
+        "SELECT * FROM VALUES\n",
+        "  ('Random Forest (champion)', 'RMSE', 1.782), ('Random Forest (champion)', 'MAE', 0.429), ('Random Forest (champion)', 'R²', 0.966),\n",
+        "  ('Linear Regression', 'RMSE', 2.026), ('Linear Regression', 'MAE', 0.705), ('Linear Regression', 'R²', 0.955)\n",
+        "  AS t(model, metric, value)"
+      ]
     }
   ],
   "pages": [
@@ -34,7 +321,12 @@
         {
           "widget": {
             "name": "title",
-            "textbox_spec": "# NYC Taxi Lakehouse \u2014 Gold layer\nSource: `workspace.tugas2.gold_taxi` + custom view `v_taxi_daily_kpi` \u00b7 refreshed by the scheduled DLT job"
+            "multilineTextboxSpec": {
+              "lines": [
+                "# NYC Taxi Lakehouse — Gold layer\n",
+                "Source: `workspace.tugas2.gold_taxi` + custom view `v_taxi_daily_kpi` · refreshed by the scheduled DLT job"
+              ]
+            }
           },
           "position": {
             "x": 0,
@@ -51,13 +343,13 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "ds_kpi",
-                  "disaggregated": false,
                   "fields": [
                     {
                       "name": "v",
                       "expression": "SUM(`trips`)"
                     }
-                  ]
+                  ],
+                  "disaggregated": false
                 }
               }
             ],
@@ -91,13 +383,13 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "ds_kpi",
-                  "disaggregated": false,
                   "fields": [
                     {
                       "name": "v",
                       "expression": "SUM(`revenue`)"
                     }
-                  ]
+                  ],
+                  "disaggregated": false
                 }
               }
             ],
@@ -131,13 +423,13 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "ds_kpi",
-                  "disaggregated": false,
                   "fields": [
                     {
                       "name": "v",
                       "expression": "AVG(`avg_fare`)"
                     }
-                  ]
+                  ],
+                  "disaggregated": false
                 }
               }
             ],
@@ -171,13 +463,13 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "ds_kpi",
-                  "disaggregated": false,
                   "fields": [
                     {
                       "name": "v",
                       "expression": "SUM(`days_loaded`)"
                     }
-                  ]
+                  ],
+                  "disaggregated": false
                 }
               }
             ],
@@ -211,13 +503,13 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "ds_kpi",
-                  "disaggregated": false,
                   "fields": [
                     {
                       "name": "v",
                       "expression": "MAX(`last_refresh`)"
                     }
-                  ]
+                  ],
+                  "disaggregated": false
                 }
               }
             ],
@@ -251,7 +543,6 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "ds_daily",
-                  "disaggregated": true,
                   "fields": [
                     {
                       "name": "pickup_date",
@@ -261,7 +552,8 @@
                       "name": "trips",
                       "expression": "`trips`"
                     }
-                  ]
+                  ],
+                  "disaggregated": true
                 }
               }
             ],
@@ -311,7 +603,6 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "ds_daily",
-                  "disaggregated": true,
                   "fields": [
                     {
                       "name": "pickup_date",
@@ -321,7 +612,8 @@
                       "name": "revenue",
                       "expression": "`revenue`"
                     }
-                  ]
+                  ],
+                  "disaggregated": true
                 }
               }
             ],
@@ -371,7 +663,6 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "ds_hourly",
-                  "disaggregated": true,
                   "fields": [
                     {
                       "name": "pickup_hour",
@@ -381,7 +672,8 @@
                       "name": "trips",
                       "expression": "`trips`"
                     }
-                  ]
+                  ],
+                  "disaggregated": true
                 }
               }
             ],
@@ -431,7 +723,6 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "ds_dow",
-                  "disaggregated": true,
                   "fields": [
                     {
                       "name": "weekday",
@@ -441,7 +732,8 @@
                       "name": "fare_per_mile",
                       "expression": "`fare_per_mile`"
                     }
-                  ]
+                  ],
+                  "disaggregated": true
                 }
               }
             ],
@@ -491,7 +783,6 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "ds_pred",
-                  "disaggregated": true,
                   "fields": [
                     {
                       "name": "scored_at",
@@ -521,7 +812,8 @@
                       "name": "abs_error",
                       "expression": "`abs_error`"
                     }
-                  ]
+                  ],
+                  "disaggregated": true
                 }
               }
             ],
@@ -745,7 +1037,1057 @@
             "height": 5
           }
         }
-      ]
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "ml_model",
+      "displayName": "ML Model",
+      "layout": [
+        {
+          "widget": {
+            "name": "ml_title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Fare prediction model — Random Forest `taxi_fare_model@champion`\n",
+                "Type a trip scenario below: the prediction comes **live from the Model Serving API** (`taxi-fare-endpoint`, called with `ai_query`). The first call after idle can take a minute (scale-to-zero)."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "f_distance",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_whatif_distance",
+                "query": {
+                  "datasetName": "ds_ml_whatif",
+                  "parameters": [
+                    {
+                      "name": "distance",
+                      "keyword": "distance"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_curve_distance",
+                "query": {
+                  "datasetName": "ds_ml_curve",
+                  "parameters": [
+                    {
+                      "name": "distance",
+                      "keyword": "distance"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-text-entry",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "distance",
+                    "queryName": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_whatif_distance"
+                  },
+                  {
+                    "parameterName": "distance",
+                    "queryName": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_curve_distance"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Trip distance (miles)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "f_duration",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_whatif_duration",
+                "query": {
+                  "datasetName": "ds_ml_whatif",
+                  "parameters": [
+                    {
+                      "name": "duration",
+                      "keyword": "duration"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_curve_duration",
+                "query": {
+                  "datasetName": "ds_ml_curve",
+                  "parameters": [
+                    {
+                      "name": "duration",
+                      "keyword": "duration"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-text-entry",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "duration",
+                    "queryName": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_whatif_duration"
+                  },
+                  {
+                    "parameterName": "duration",
+                    "queryName": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_curve_duration"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Trip duration (minutes)"
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "f_hour",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_whatif_hour",
+                "query": {
+                  "datasetName": "ds_ml_whatif",
+                  "parameters": [
+                    {
+                      "name": "hour",
+                      "keyword": "hour"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_curve_hour",
+                "query": {
+                  "datasetName": "ds_ml_curve",
+                  "parameters": [
+                    {
+                      "name": "hour",
+                      "keyword": "hour"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-text-entry",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "hour",
+                    "queryName": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_whatif_hour"
+                  },
+                  {
+                    "parameterName": "hour",
+                    "queryName": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_curve_hour"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Pickup hour (0–23)"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "f_dow",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_whatif_dow",
+                "query": {
+                  "datasetName": "ds_ml_whatif",
+                  "parameters": [
+                    {
+                      "name": "dow",
+                      "keyword": "dow"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_curve_dow",
+                "query": {
+                  "datasetName": "ds_ml_curve",
+                  "parameters": [
+                    {
+                      "name": "dow",
+                      "keyword": "dow"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-text-entry",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "dow",
+                    "queryName": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_whatif_dow"
+                  },
+                  {
+                    "parameterName": "dow",
+                    "queryName": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_curve_dow"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Day of week (1=Sun … 7=Sat)"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "f_pickup_zip",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_whatif_pickup_zip",
+                "query": {
+                  "datasetName": "ds_ml_whatif",
+                  "parameters": [
+                    {
+                      "name": "pickup_zip",
+                      "keyword": "pickup_zip"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_curve_pickup_zip",
+                "query": {
+                  "datasetName": "ds_ml_curve",
+                  "parameters": [
+                    {
+                      "name": "pickup_zip",
+                      "keyword": "pickup_zip"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-text-entry",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "pickup_zip",
+                    "queryName": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_whatif_pickup_zip"
+                  },
+                  {
+                    "parameterName": "pickup_zip",
+                    "queryName": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_curve_pickup_zip"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Pickup zip"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "f_dropoff_zip",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_whatif_dropoff_zip",
+                "query": {
+                  "datasetName": "ds_ml_whatif",
+                  "parameters": [
+                    {
+                      "name": "dropoff_zip",
+                      "keyword": "dropoff_zip"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_curve_dropoff_zip",
+                "query": {
+                  "datasetName": "ds_ml_curve",
+                  "parameters": [
+                    {
+                      "name": "dropoff_zip",
+                      "keyword": "dropoff_zip"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-text-entry",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "dropoff_zip",
+                    "queryName": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_whatif_dropoff_zip"
+                  },
+                  {
+                    "parameterName": "dropoff_zip",
+                    "queryName": "parameter_dashboards/01f1dcd54d3b1dffaf675d8ff582a80f/datasets/ds_ml_curve_dropoff_zip"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Dropoff zip"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "ml_pred",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_ml_whatif",
+                  "fields": [
+                    {
+                      "name": "predicted_fare",
+                      "expression": "`predicted_fare`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "predicted_fare",
+                  "displayName": "Predicted fare (USD)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Predicted fare (USD)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "ml_similar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_ml_whatif",
+                  "fields": [
+                    {
+                      "name": "similar_avg_fare",
+                      "expression": "`similar_avg_fare`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "similar_avg_fare",
+                  "displayName": "Avg real fare of similar trips (USD)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Avg real fare of similar trips (USD)"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 4,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "ml_similar_n",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_ml_whatif",
+                  "fields": [
+                    {
+                      "name": "similar_trips",
+                      "expression": "`similar_trips`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "similar_trips",
+                  "displayName": "Similar historical trips (±20% distance & duration)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Similar historical trips (±20% distance & duration)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 4,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "ml_curve",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_ml_curve",
+                  "fields": [
+                    {
+                      "name": "trip_distance",
+                      "expression": "`trip_distance`"
+                    },
+                    {
+                      "name": "predicted_fare",
+                      "expression": "`predicted_fare`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "trip_distance",
+                  "displayName": "Trip distance (miles), same speed/time/zips",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Trip distance (miles), same speed/time/zips"
+                  }
+                },
+                "y": {
+                  "fieldName": "predicted_fare",
+                  "displayName": "Predicted fare (USD)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Predicted fare (USD)"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "How the predicted fare grows with distance for this scenario"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "ml_compare",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_ml_compare",
+                  "fields": [
+                    {
+                      "name": "metric",
+                      "expression": "`metric`"
+                    },
+                    {
+                      "name": "value",
+                      "expression": "`value`"
+                    },
+                    {
+                      "name": "model",
+                      "expression": "`model`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "metric",
+                  "displayName": "Metric",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "axis": {
+                    "title": "Metric"
+                  }
+                },
+                "y": {
+                  "fieldName": "value",
+                  "displayName": "Value",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Value"
+                  }
+                },
+                "color": {
+                  "fieldName": "model",
+                  "displayName": "Model",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Training results (MLflow): Random Forest vs Linear Regression — lower RMSE/MAE and higher R² is better"
+              },
+              "mark": {
+                "layout": "group"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 7,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "ml_live_title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Live performance of the deployed API\n",
+                "Trips scored by the scheduled job's `call_model_api` step (`workspace.tugas2.taxi_predictions`)."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "ml_n",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_ml_live",
+                  "fields": [
+                    {
+                      "name": "scored_trips",
+                      "expression": "`scored_trips`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "scored_trips",
+                  "displayName": "Trips scored by the API"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Trips scored by the API"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "ml_mae",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_ml_live",
+                  "fields": [
+                    {
+                      "name": "mae",
+                      "expression": "`mae`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "mae",
+                  "displayName": "MAE (USD)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "MAE (USD)"
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 14,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "ml_rmse",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_ml_live",
+                  "fields": [
+                    {
+                      "name": "rmse",
+                      "expression": "`rmse`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "rmse",
+                  "displayName": "RMSE (USD)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "RMSE (USD)"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 14,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "ml_batches",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_ml_live",
+                  "fields": [
+                    {
+                      "name": "api_batches",
+                      "expression": "`api_batches`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "api_batches",
+                  "displayName": "API batches"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "API batches"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 14,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "ml_last",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_ml_live",
+                  "fields": [
+                    {
+                      "name": "last_scored",
+                      "expression": "`last_scored`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "last_scored",
+                  "displayName": "Last scored (UTC)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Last scored (UTC)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 14,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "ml_scatter",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_ml_scatter",
+                  "fields": [
+                    {
+                      "name": "actual_fare",
+                      "expression": "`actual_fare`"
+                    },
+                    {
+                      "name": "predicted_fare",
+                      "expression": "`predicted_fare`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "scatter",
+              "encodings": {
+                "x": {
+                  "fieldName": "actual_fare",
+                  "displayName": "Actual fare (USD)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Actual fare (USD)"
+                  }
+                },
+                "y": {
+                  "fieldName": "predicted_fare",
+                  "displayName": "Predicted fare (USD)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "Predicted fare (USD)"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Actual vs predicted fare (points on the diagonal = perfect)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "ml_trend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_ml_trend",
+                  "fields": [
+                    {
+                      "name": "scored_at",
+                      "expression": "`scored_at`"
+                    },
+                    {
+                      "name": "mae",
+                      "expression": "`mae`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "scored_at",
+                  "displayName": "Scored at",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "axis": {
+                    "title": "Scored at"
+                  }
+                },
+                "y": {
+                  "fieldName": "mae",
+                  "displayName": "MAE (USD)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "MAE (USD)"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Mean absolute error per API batch"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 16,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "ml_dist",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_ml_dist",
+                  "fields": [
+                    {
+                      "name": "distance_band",
+                      "expression": "`distance_band`"
+                    },
+                    {
+                      "name": "mae",
+                      "expression": "`mae`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "distance_band",
+                  "displayName": "Distance band",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "axis": {
+                    "title": "Distance band"
+                  }
+                },
+                "y": {
+                  "fieldName": "mae",
+                  "displayName": "MAE (USD)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "axis": {
+                    "title": "MAE (USD)"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Error by trip distance"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 22,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "ml_how",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### How it works\n",
+                "- **Features:** distance, duration, pickup hour, day of week, pickup & dropoff zip (built in `silver_taxi`).\n",
+                "- **Model:** Random Forest won against Linear Regression in MLflow and is registered as `@champion`.\n",
+                "- **Serving:** Databricks Model Serving REST endpoint, also tested with Postman.\n",
+                "- **Similar trips:** historical trips within ±20% distance and ±25% (min 3 min) duration — a sanity check for the prediction."
+              ]
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 22,
+            "width": 3,
+            "height": 5
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
     }
   ]
 }

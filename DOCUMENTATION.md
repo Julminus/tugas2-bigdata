@@ -52,7 +52,7 @@ Job tugas2_taxi_lakehouse_job (every 2 min): feed_new_csv ─▶ DLT pipeline �
 | `notebooks/02b_export_onnx.py` | ONNX export of the best model + ONNX Runtime check |
 | `notebooks/03_call_model_api.py` | Post-pipeline scoring through the endpoint → `taxi_predictions` |
 | `job/job_config.json` | Databricks Job definition (exported while schedule was PAUSED) |
-| `dashboard/tugas2_taxi_dashboard.lvdash.json` | AI/BI dashboard definition |
+| `dashboard/tugas2_taxi_dashboard.lvdash.json` | AI/BI dashboard definition (Overview + ML Model pages) |
 | `postman/Tugas2_Taxi_Fare_API.postman_collection.json` | API test collection (5 requests) |
 | `postman/Postman-Report.html` | Latest newman run report |
 
@@ -139,20 +139,33 @@ Run it:
     --reporter-htmlextra-hideResponseBody "4. Google Drive - fetch dataset (CSV)"
   ```
 
-## 8. Automation
+## 8. Dashboard
+
+`Tugas2 NYC Taxi Dashboard` ([published](https://dbc-ee445d02-3afe.cloud.databricks.com/dashboardsv3/01f1dcd54d3b1dffaf675d8ff582a80f/published?o=7474660676014887)) has two pages:
+
+- **Overview**: Gold-layer KPIs: total trips, revenue, average fare, days loaded, daily trend, revenue, trips by hour, fare per mile by weekday, latest API predictions.
+- **ML Model** (added 15 Nov 2026):
+  - **What-if predictor**: six inputs (distance, duration, pickup hour, day of week 1=Sun…7=Sat, pickup/dropoff zip). The dashboard calls the live endpoint through `ai_query('taxi-fare-endpoint', named_struct(...))` and shows the predicted fare next to the average real fare and count of similar historical trips in `silver_taxi` (±20% distance, ±25%/min 3 min duration). Example: 2.5 mi / 12 min / Fri 18:00 → **$10.74** predicted vs **$10.76** across 1,830 similar trips.
+  - **Fare vs distance curve**: predicted fare for 1–20 miles at the scenario's speed, hour, day and zips (20 endpoint calls per input change).
+  - **Training results**: Random Forest vs Linear Regression (RMSE, MAE, R² from MLflow; static values).
+  - **Live API performance** from `taxi_predictions`: trips scored, MAE, RMSE, batches, last scored; actual-vs-predicted scatter; MAE per batch; MAE by distance band.
+
+Inputs are text boxes (dashboard parameters), not sliders. The first prediction after the endpoint has been idle can take about a minute because of scale-to-zero. If `taxi-fare-endpoint` is missing, the what-if tiles and curve error out, but the other charts still load.
+
+## 9. Automation
 
 Job `tugas2_taxi_lakehouse_job`: `feed_new_csv` → `dlt_bronze_silver_gold` → `call_model_api`, cron `0 0/2 * * * ?` (Asia/Jakarta), `max_concurrent_runs = 1`, parameters `landing_path` and `endpoint_name`. The schedule is **PAUSED** to save Free Edition compute.
 
-## 9. Demo checklist (16 Nov)
+## 10. Demo checklist (16 Nov)
 
 1. Confirm `taxi-fare-endpoint` exists and is READY (Postman request 1).
 2. ~30 min before: send one prediction to wake the endpoint (cold start can take minutes).
 3. Resume the job schedule (Job page → *Schedules & Triggers* → **Resume**); pause it again afterwards.
-4. Open the dashboard; after one job run, confirm "Total trips" / "Days loaded" increase.
+4. Open the dashboard's **ML Model** page and try a scenario (e.g. 10.5 mi / 32 min → about $32.90). Then on **Overview**, after one job run, confirm "Total trips" / "Days loaded" increase.
 5. Optional: run `00b_pull_from_gdrive` live to show the Drive → Databricks pull.
 6. Screenshots still needed: MLflow experiment, dashboard, job config, catalog, DLT graph, Postman run.
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
@@ -162,7 +175,7 @@ Job `tugas2_taxi_lakehouse_job`: `feed_new_csv` → `dlt_bronze_silver_gold` →
 | `00b` says Drive returned HTML | File is not shared as *Anyone with the link → Viewer*, or wrong file ID |
 | `00b` cannot reach Google Drive | Free Edition egress block — upload the CSV to `raw/gdrive/` manually and run from step 2 |
 
-## 11. Security notes
+## 12. Security notes
 
 - No tokens are stored in the repo; the Postman collection's `token` variable is empty and the HTML report hides the `Authorization` header and the `token` variable.
 - Keep the PAT in a private local file (e.g. `~/.databricks_tugas2_token`, `chmod 600`) or in Postman's *current value* only. Revoke tokens that were shared anywhere, and after the demo.
